@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "alvicourse@gmail.com" || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['admin', 'student'];
+    }
+
+    match /users/{userId} {
+      allow read: if true; // Publicly readable for leaderboard/UI (Note: Consider splitting public/private data if email privacy is critical)
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == 'student' || isAdmin());
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /seminars/{seminarId} {
+      allow read: if true; // Publicly readable for registration
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /registrations/{regId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.studentUid) || isAdmin());
+      allow create: if isAuthenticated() && (isOwner(request.resource.data.studentUid) || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /attendance/{attId} {
+      allow read: if true; // Publicly readable for leaderboard
+      allow create: if isAuthenticated() && (isOwner(request.resource.data.studentUid) || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /certificates/{certId} {
+      allow read: if true; // Publicly readable for verification
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /certificateTemplates/{templateId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /siteSettings/{settingId} {
+      allow read: if isAdmin() || settingId == 'branding'; 
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && (isOwner(request.resource.data.studentUid) || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+  }
+}
